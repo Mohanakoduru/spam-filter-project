@@ -1,0 +1,313 @@
+1. Environment Setup
+Install Anaconda: Make sure you have the Anaconda Distribution installed. Choose the Python 3 version.
+
+Create a New Environment: Open your Anaconda Prompt (or terminal) and create a dedicated environment:
+
+bash
+conda create -n spam_filter_env python=3.8
+conda activate spam_filter_env
+Install Required Libraries: We’ll need pandas, numpy, and optionally matplotlib and seaborn for visualizations:
+
+bash
+conda install pandas numpy matplotlib seaborn
+Since we are coding the classifier from scratch, we won’t use scikit-learn’s Naive Bayes—but we might use its train-test splitting function:
+
+bash
+conda install -c conda-forge scikit-learn
+Launch Jupyter Notebook: Run:
+
+bash
+jupyter notebook
+and open a new notebook named, for example, spam_filter.ipynb.
+
+2. Overview of the Project
+Our goal is to build a spam filter using the SMS Spam Collection dataset downloaded from UCI SMS Spam Collection.
+
+Project Outline:
+
+Step 1. Load and explore the dataset.
+
+Step 2. Preprocess the text data (tokenization, cleaning).
+
+Step 3. Calculate the prior probabilities for each class (spam/ham).
+
+Step 4. Build the word frequency dictionaries and compute conditional probabilities (with Laplace smoothing).
+
+Step 5. Implement the Naive Bayes algorithm from scratch.
+
+Step 6. Test your classifier on unseen data and evaluate its accuracy.
+
+3. Step-by-Step Implementation
+Step 3.1: Load and Explore the SMS Spam Collection Dataset
+The dataset is in a tab-separated format. Typically, it comes without a header so we will add one manually.
+
+python
+import pandas as pd
+
+# Adjust the path as needed—place the SMSSpamCollection file in your working directory.
+data = pd.read_csv('SMSSpamCollection', sep='\t', header=None, names=['label', 'message'])
+print(data.head())
+print(data.info())
+print(data['label'].value_counts())
+What this does:
+
+Reads the file with two columns: label (with values "ham" or "spam") and message.
+
+Displays a snapshot and basic information about the data.
+
+Step 3.2: Preprocess the Text Data
+We need to clean the messages by converting to lowercase, removing punctuation/special characters, and tokenizing the text. You can also remove stop words if desired, though for simplicity we’ll focus on key cleaning steps here.
+
+python
+import re
+
+def preprocess_text(text):
+    # Convert to lower case
+    text = text.lower()
+    # Remove punctuation and non-word characters (keep only letters and numbers)
+    text = re.sub(r'[^a-z0-9\s]', '', text)
+    # Remove extra whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+# Apply preprocessing on the 'message' column
+data['cleaned_message'] = data['message'].apply(preprocess_text)
+print(data[['message', 'cleaned_message']].head())
+Why this matters: Cleaning standardizes text for more effective word frequency counting.
+
+Step 3.3: Split the Data into Training and Testing Sets
+Before building the classifier, you’ll want to separate the data into training and testing sets to later evaluate performance.
+
+python
+from sklearn.model_selection import train_test_split
+
+# We use the cleaned messages and labels. You can choose a split ratio (80/20 is common).
+X_train, X_test, y_train, y_test = train_test_split(
+    data['cleaned_message'], data['label'], test_size=0.2, random_state=42
+)
+
+# Combine into DataFrames for convenience
+train_data = pd.DataFrame({'message': X_train, 'label': y_train}).reset_index(drop=True)
+test_data = pd.DataFrame({'message': X_test, 'label': y_test}).reset_index(drop=True)
+print(train_data.head())
+Step 3.4: Building the Frequency Dictionaries & Calculating Priors
+Now we calculate:
+
+Prior probabilities: The overall probability of a message being spam or ham.
+
+Word frequency counts: For each class, count how many times each word appears.
+
+python
+from collections import defaultdict, Counter
+import math
+
+# Initialize dictionaries for word counts and counters for each class.
+spam_word_counts = defaultdict(int)
+ham_word_counts = defaultdict(int)
+spam_messages = 0
+ham_messages = 0
+
+def tokenize(text):
+    return text.split()  # Simple whitespace tokenizer
+
+for index, row in train_data.iterrows():
+    label = row['label']
+    words = tokenize(row['message'])
+    if label == 'spam':
+        spam_messages += 1
+        for word in words:
+            spam_word_counts[word] += 1
+    else:  # ham messages
+        ham_messages += 1
+        for word in words:
+            ham_word_counts[word] += 1
+
+total_messages = spam_messages + ham_messages
+print("Total messages:", total_messages)
+print("Spam messages:", spam_messages)
+print("Ham messages:", ham_messages)
+
+# Calculate priors
+prior_spam = spam_messages / total_messages
+prior_ham = ham_messages / total_messages
+print("Prior probability for spam:", prior_spam)
+print("Prior probability for ham:", prior_ham)
+Key points:
+
+We compute how many messages are spam and ham in the training data.
+
+Prior probabilities tell us the baseline chance (e.g., if 20% of messages are spam, then P(spam) = 0.2).
+
+Step 3.5: Compute Conditional Probabilities (with Laplace Smoothing)
+For each word and each class, compute the conditional probability:
+
+𝑃
+(
+𝑤
+𝑜
+𝑟
+𝑑
+∣
+class
+)
+=
+count(word in class)
++
+1
+total words in class
++
+𝑉
+where 
+𝑉
+ is the vocabulary size of all unique words in the training data.
+
+python
+# Calculate total word counts in each class and build overall vocabulary.
+total_spam_words = sum(spam_word_counts.values())
+total_ham_words = sum(ham_word_counts.values())
+
+vocabulary = set(list(spam_word_counts.keys()) + list(ham_word_counts.keys()))
+vocab_size = len(vocabulary)
+print("Total spam words:", total_spam_words)
+print("Total ham words:", total_ham_words)
+print("Vocabulary size:", vocab_size)
+
+# Define functions to compute conditional probabilities with Laplace smoothing.
+def word_prob(word, label):
+    # Returns probability of word given a label (spam or ham)
+    if label == 'spam':
+        count = spam_word_counts.get(word, 0)
+        return (count + 1) / (total_spam_words + vocab_size)
+    else:  # ham
+        count = ham_word_counts.get(word, 0)
+        return (count + 1) / (total_ham_words + vocab_size)
+Note: Laplace smoothing (adding 1) prevents a zero probability for unseen words.
+
+Step 3.6: Implement the Naive Bayes Classification Function
+For a new message, we’ll:
+
+Preprocess and tokenize it.
+
+For each class (spam, ham), calculate the log probability (to avoid underflow when multiplying many small numbers):
+
+Start with the log of the prior probability.
+
+For each word in the message, add the log of its conditional probability.
+
+Return the class with the higher computed score.
+
+python
+def classify_message(message):
+    # Preprocess and tokenize message
+    message = preprocess_text(message)
+    words = tokenize(message)
+    
+    # Calculate log probabilities to avoid numerical underflow
+    spam_score = math.log(prior_spam)
+    ham_score = math.log(prior_ham)
+    
+    for word in words:
+        spam_score += math.log(word_prob(word, 'spam'))
+        ham_score += math.log(word_prob(word, 'ham'))
+        
+    # Return the label with the higher score
+    if spam_score > ham_score:
+        return 'spam'
+    else:
+        return 'ham'
+
+# Test our classifier on a couple of example messages:
+example1 = "Congratulations! You've won a free ticket. Call now!"
+example2 = "Hey, are we still on for lunch tomorrow?"
+print("Example 1 classified as:", classify_message(example1))
+print("Example 2 classified as:", classify_message(example2))
+Important:
+
+Using logarithms transforms the product of probabilities into a sum of logarithms, which is more numerically stable.
+
+Step 3.7: Evaluate the Model on Unseen Data
+We now run our classifier on the test set and compute accuracy along with other evaluation metrics.
+
+python
+# Classify all messages in the test_data
+predictions = test_data['message'].apply(classify_message)
+
+# Add the predictions to the test_data DataFrame
+test_data['predicted_label'] = predictions
+
+# Calculate accuracy
+accuracy = (test_data['predicted_label'] == test_data['label']).mean()
+print("Accuracy on test data:", accuracy)
+
+# Optionally, generate a detailed classification report:
+from sklearn.metrics import classification_report, confusion_matrix
+
+print("\nClassification Report:")
+print(classification_report(test_data['label'], test_data['predicted_label']))
+
+print("Confusion Matrix:")
+print(confusion_matrix(test_data['label'], test_data['predicted_label']))
+Evaluation Notes:
+
+Accuracy is a straightforward metric, but look at precision, recall, and F1-scores especially for the spam class since misclassifications can have different consequences.
+
+4. ASCII Flowchart of the Workflow
+Below is an ASCII diagram summarizing the overall workflow:
+
+      +----------------------+
+      |  Load SMS Dataset    |
+      +----------+-----------+
+                 |
+                 v
+      +----------+-----------+
+      |  Data Exploration    |
+      |  (EDA & Visualization)|
+      +----------+-----------+
+                 |
+                 v
+      +----------+-----------+
+      | Preprocess Text Data |
+      |  (Cleaning & Tokenize)|
+      +----------+-----------+
+                 |
+                 v
+      +----------+-----------+
+      |   Train-Test Split   |
+      +----------+-----------+
+                 |
+                 v
+      +----------+-----------+
+      | Compute Priors &     |
+      | Word Frequency Counts|
+      +----------+-----------+
+                 |
+                 v
+      +----------+-----------+
+      |  Calculate Conditional|
+      |   Probabilities      |
+      +----------+-----------+
+                 |
+                 v
+      +----------+-----------+
+      |  Implement Naive Bayes|
+      |     Classifier       |
+      +----------+-----------+
+                 |
+                 v
+      +----------+-----------+
+      | Evaluate & Tune Model|
+      +----------------------+
+5. Final Thoughts and Next Steps
+Iterate and Experiment: Once your basic model is working, you might experiment with:
+
+Removing or adding stop-words.
+
+Using more sophisticated tokenization.
+
+Comparing your scratch implementation with scikit-learn’s MultinomialNB.
+
+Tuning parameters or applying feature weighting adjustments.
+
+Deepen Your Analysis: Visualize confusion matrices, precision-recall curves, or even errors to understand where your classifier might be misbehaving.
+
+Document Your Process: Make sure to comment your code and consider writing a brief report or README file explaining your methodology and findings
